@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── Certificate PDFs ────────────────────────────────────────────────
+    // Path: /certificates/{certId}.pdf
+    // - Anyone can READ (download) certificate PDFs — needed for public verification
+    // - Only authenticated users can WRITE (upload) new certificates
+    // - Max file size: 10MB | Only PDF allowed
+    match /certificates/{certId} {
+      allow read: if true;
+
+      allow write: if request.auth != null
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType == 'application/pdf';
+    }
+
+    // ── Default: deny everything else ──────────────────────────────────
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "Certificate": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Certificate",
+      "type": "object",
+      "description": "Represents the metadata for a certificate issued by an Admin (University). This entity stores off-chain data in MongoDB and includes references to the immutable hash stored on the Ethereum blockchain for verification purposes.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Certificate entity in the database. (Primary Key)"
+        },
+        "certificateId": {
+          "type": "string",
+          "description": "A unique, application-level identifier for the certificate. This ID is used for blockchain interactions (e.g., as the 'certId' in smart contract functions) and is embedded in QR codes for easy lookup and verification."
+        },
+        "studentName": {
+          "type": "string",
+          "description": "The full name of the student or individual to whom the certificate was issued."
+        },
+        "course": {
+          "type": "string",
+          "description": "The name or title of the academic course or program for which the certificate was awarded."
+        },
+        "issueDate": {
+          "type": "string",
+          "description": "The specific date and time when the certificate was officially issued and recorded.",
+          "format": "date-time"
+        },
+        "blockchainTransactionHash": {
+          "type": "string",
+          "description": "The unique transaction hash on the Ethereum blockchain. This hash indicates the specific transaction where the certificate's SHA-256 hash was recorded, serving as a direct link to the on-chain proof of existence."
+        },
+        "certificateHash": {
+          "type": "string",
+          "description": "The SHA-256 cryptographic hash of the original certificate PDF file. While this hash is primarily stored on the blockchain, it is duplicated here in the database for efficient metadata management and quicker verification checks against uploaded files or provided IDs."
+        }
+      },
+      "required": [
+        "id",
+        "certificateId",
+        "studentName",
+        "course",
+        "issueDate",
+        "blockchainTransactionHash",
+        "certificateHash"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/admins/{adminUid}",
+        "definition": {
+          "entityName": "Admin",
+          "schema": {
+            "$ref": "#/backend/entities/Admin"
+          },
+          "description": "Stores documents representing users with administrative privileges. The existence of a document at /admins/{uid} signifies that the user with uid is an administrator. This collection is crucial for Database-Backed Access Control (DBAC). This Admin entity is conceptually defined for role management; documents here are typically lightweight, e.g., { 'uid': '{adminUid}', 'role': 'admin' } or simply empty.",
+          "params": [
+            {
+              "name": "adminUid",
+              "description": "The unique Firebase User ID (UID) of an administrator."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/certificates/{certificateId}",
+        "definition": {
+          "entityName": "Certificate",
+          "schema": {
+            "$ref": "#/backend/entities/Certificate"
+          },
+          "description": "Stores metadata for certificates issued by Admins. Each document's ID is set to its 'certificateId' for direct, efficient lookups, which aligns with its use in QR codes and blockchain interactions. For Authorization Independence, each 'Certificate' document MUST include a denormalized 'ownerId' field (string, storing the Firebase UID of the issuing Admin) for secure ownership-based write rules. This structure also supports secure Query-Able Permissions (QAPs) for admins to list their own certificates and public read access for verification.",
+          "params": [
+            {
+              "name": "certificateId",
+              "description": "The unique, application-level identifier for the certificate. This ID is used as the document's ID in Firestore, facilitating direct lookups for verification."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore data structure for the 'Blockchain-Based Certificate Verification System' is designed to be secure, scalable, and debuggable, adhering to all core design principles and mandates. The system's primary entity, 'Certificate' metadata, is stored in a dedicated collection, and administrative roles are managed via a separate collection for Database-Backed Access Control (DBAC).Authorization Independence:1.  Admin Roles: The /admins/{adminUid} collection implements authorization independence by using existence-based checks. To determine if a user is an administrator, security rules will simply check for the existence of a document at /admins/$(request.auth.uid). This avoids any get() operations on other documents or collections, allowing atomic and highly performant authorization checks.2.  Certificate Ownership: Each Certificate document in the /certificates/{certificateId} collection includes a denormalized ownerId field. This ownerId stores the Firebase User ID (UID) of the administrator who issued the certificate. This denormalization is crucial for authorization independence, enabling security rules to determine ownership directly from the document itself (e.g., request.auth.uid == resource.data.ownerId) without needing to perform get() calls to other documents (e.g., a parent user document). This ensures that operations like updating or deleting a specific certificate can be authorized atomically.Clarity of Intent (Debuggability):The explicit /admins collection clearly states the intent for role management. The ownerId field within each Certificate document explicitly declares its administrative ownership. This makes security rules straightforward and easy to audit, as authorization logic directly reflects the data structure.DBAC (No Custom Claims):The /admins/{adminUid} collection is specifically designed to store roles in the database. The presence of a document for a user's UID in this collection grants them administrative privileges, fulfilling the DBAC mandate without relying on custom claims.QAPs (Rules are not Filters):1.  Certificate Verification (Read): The /certificates/{certificateId} collection is structured to support efficient verification. Verifiers can access specific certificate metadata directly by its certificateId (which is also the document ID). Security rules can allow get operations on match /certificates/{certificateId} (e.g., allow get: if true; for public verification, or allow get: if request.auth.uid != null; for authenticated verification). This access pattern is a perfect QAP, as it fetches a single, known document without filtering requirements.2.  Admin Certificate Management (List): For administrators to view or list their own issued certificates, a query such as db.collection('certificates').where('ownerId', '==', request.auth.uid).get() can be used. The ownerId field in the Certificate documents enables a security rule like allow list: if request.auth.uid != null && resource.data.ownerId == request.auth.uid;. This query's where clause aligns perfectly with the security rule's condition, making it a secure and performant QAP.Structural Segregation & Access Modeling:- The /admins collection is segregated to exclusively manage administrative roles, ensuring a homogeneous security posture (only admins can create/delete entries here).- The /certificates collection holds all certificate metadata. All documents within this collection share a consistent security posture: writeable by the issuing admin (or any admin, depending on specific rules), and readable by verifiers (either publicly or authenticated). This segregation simplifies rule writing.- Global Roles (DBAC): Implemented using /admins/{adminUid}.- Path-Based Ownership: Used for admins to designate their role.- Denormalization: ownerId in Certificate documents.Data Clarity and Predictability:Using certificateId as the document ID for /certificates ensures predictable lookups. The ownerId field explicitly defines administrative responsibility. All field names are semantically clear."
+  }
+}
